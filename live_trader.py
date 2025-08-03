@@ -3,6 +3,7 @@ from utils.bitvavo_client import get_bitvavo_client, get_candles_df
 from utils.indicators import add_all_indicators
 from analyze_signals import generate_signal
 
+# Instellingen
 TRADE_AMOUNT_EUR = 10.00   # Vast bedrag per trade
 MIN_EUR_AVAILABLE = 15.00  # Altijd minstens dit bedrag overhouden
 INTERVAL = '1h'
@@ -15,7 +16,6 @@ def get_available_eur(bitvavo):
     return 0.0
 
 def get_all_eur_markets(bitvavo):
-    # Haal alle markten op, filter alleen de EUR paren (spot markets)
     markets = bitvavo.markets({})
     eur_markets = [m['market'] for m in markets if m['market'].endswith('-EUR')]
     return eur_markets
@@ -32,6 +32,9 @@ def main():
     for market in all_markets:
         try:
             df = get_candles_df(market, INTERVAL, CANDLE_LIMIT)
+            if df is None or df.empty or len(df) < 2:
+                print(f"{market}: GEEN of te weinig DATA (wordt overgeslagen)")
+                continue
             df = add_all_indicators(df)
             signal = generate_signal(df)
 
