@@ -3,6 +3,7 @@ import sqlite3
 import matplotlib.pyplot as plt
 import io
 import time
+from utils.bitvavo_client import get_bitvavo_client
 
 app = Flask(__name__)
 
@@ -22,6 +23,21 @@ DASHBOARD_HTML = """
 </head>
 <body>
     <h1>Bitvavo Bot Dashboard</h1>
+    <h2>Saldo's (live)</h2>
+    <table>
+        <tr>
+            <th>Coin</th>
+            <th>Beschikbaar</th>
+            <th>In Order</th>
+        </tr>
+        {% for bal in balances %}
+        <tr>
+            <td>{{ bal['symbol'] }}</td>
+            <td>{{ bal['available'] }}</td>
+            <td>{{ bal['inOrder'] }}</td>
+        </tr>
+        {% endfor %}
+    </table>
     <h2>Dropdown: coins dicht bij trade-signaal</h2>
     <form method="get" action="/">
         <label for="coin">Coin:</label>
@@ -34,7 +50,7 @@ DASHBOARD_HTML = """
     <div style="margin-top:18px;">
         <img src="/chart/{{ selected_coin }}" alt="Grafiek" style="border:1px solid #ccc; max-width:95%;">
     </div>
-    <p style="margin-top:30px;font-size:0.95em;color:#888;">Powered by Flask + SQLite, v0.3</p>
+    <p style="margin-top:30px;font-size:0.95em;color:#888;">Powered by Flask + SQLite, v0.4</p>
 </body>
 </html>
 """
@@ -42,8 +58,16 @@ DASHBOARD_HTML = """
 def get_db_conn():
     return sqlite3.connect(DB_PATH, timeout=30)
 
+def get_live_balances():
+    try:
+        bv = get_bitvavo_client()
+        balances = bv.balance({})
+        # Toon alleen coins met non-zero saldo of inOrder
+        return [b for b in balances if float(b['available']) > 0 or float(b['inOrder']) > 0]
+    except Exception:
+        return []
+
 def get_relevant_coins():
-    # Coins met een signaal dichtbij de tradegrens (RSI < 35 of > 65)
     coins = set()
     with get_db_conn() as conn:
         c = conn.cursor()
@@ -62,10 +86,12 @@ def get_relevant_coins():
 def index():
     relevant_coins = get_relevant_coins()
     selected_coin = request.args.get("coin", relevant_coins[0])
+    balances = get_live_balances()
     return render_template_string(
         DASHBOARD_HTML,
         relevant_coins=relevant_coins,
         selected_coin=selected_coin,
+        balances=balances
     )
 
 @app.route("/chart/<market>")
@@ -79,10 +105,8 @@ def chart(market):
         rows = c.fetchall()
         if not rows:
             return "Geen data", 404
-        # Laatste 50 candles in oplopende tijd
         data = sorted([(int(ts), float(close)) for ts, close in rows])
         timestamps, closes = zip(*data)
-
         # Pak de signalen op deze timestamps
         c.execute("""
             SELECT timestamp, signal FROM signals
@@ -90,10 +114,8 @@ def chart(market):
         """.format(",".join("?"*len(timestamps))), (market, *timestamps))
         signal_map = {int(ts): sig for ts, sig in c.fetchall()}
 
-    # Plot
     plt.figure(figsize=(7, 3))
     plt.plot([time.strftime("%Y-%m-%d %H:%M", time.localtime(ts)) for ts in timestamps], closes, label="Close prijs", color='blue')
-    # Signaal-markers
     for idx, ts in enumerate(timestamps):
         sig = signal_map.get(ts)
         if sig == "BUY":
