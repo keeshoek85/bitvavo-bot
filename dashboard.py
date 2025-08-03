@@ -1,11 +1,12 @@
 from flask import Flask, render_template_string, request
-from utils.bitvavo_client import get_bitvavo_client, get_candles_df
-from utils.indicators import add_all_indicators
-from analyze_signals import generate_signal
+import sqlite3
 import matplotlib.pyplot as plt
 import io
+import time
 
 app = Flask(__name__)
+
+DB_PATH = "trades.db"
 
 DASHBOARD_HTML = """
 <!DOCTYPE html>
@@ -21,24 +22,9 @@ DASHBOARD_HTML = """
 </head>
 <body>
     <h1>Bitvavo Bot Dashboard</h1>
-    <h2>Saldo's</h2>
-    <table>
-        <tr>
-            <th>Coin</th>
-            <th>Beschikbaar</th>
-            <th>In Order</th>
-        </tr>
-        {% for bal in balances %}
-        <tr>
-            <td>{{ bal['symbol'] }}</td>
-            <td>{{ bal['available'] }}</td>
-            <td>{{ bal['inOrder'] }}</td>
-        </tr>
-        {% endfor %}
-    </table>
-    <h2>Grafiek</h2>
+    <h2>Dropdown: coins dicht bij trade-signaal</h2>
     <form method="get" action="/">
-        <label for="coin">Selecteer coin dicht bij trade signaal:</label>
+        <label for="coin">Coin:</label>
         <select name="coin" id="coin" onchange="this.form.submit()">
             {% for c in relevant_coins %}
             <option value="{{ c }}" {% if c == selected_coin %}selected{% endif %}>{{ c }}</option>
@@ -48,77 +34,83 @@ DASHBOARD_HTML = """
     <div style="margin-top:18px;">
         <img src="/chart/{{ selected_coin }}" alt="Grafiek" style="border:1px solid #ccc; max-width:95%;">
     </div>
-    <p style="margin-top:30px;font-size:0.95em;color:#888;">Powered by Flask, v0.2</p>
+    <p style="margin-top:30px;font-size:0.95em;color:#888;">Powered by Flask + SQLite, v0.3</p>
 </body>
 </html>
 """
 
+def get_db_conn():
+    return sqlite3.connect(DB_PATH, timeout=30)
+
 def get_relevant_coins():
-    bv = get_bitvavo_client()
-    markets = bv.markets({})
-    eur_markets = [m['market'] for m in markets if m['market'].endswith('-EUR')]
-    relevant = []
-    for market in eur_markets:
-        try:
-            df = get_candles_df(market, interval="1h", limit=40)
-            if df is None or df.empty or len(df) < 2:
-                continue
-            df = add_all_indicators(df)
-            # Dicht bij tradegrens: RSI < 35 of RSI > 65
-            if df['rsi'].iloc[-1] < 35 or df['rsi'].iloc[-1] > 65:
-                relevant.append(market)
-        except Exception:
-            continue
-    return relevant if relevant else ["BTC-EUR"]
+    # Coins met een signaal dichtbij de tradegrens (RSI < 35 of > 65)
+    coins = set()
+    with get_db_conn() as conn:
+        c = conn.cursor()
+        # Pak alleen de laatste candle per coin
+        c.execute("""
+        SELECT coin, rsi FROM signals WHERE id IN (
+            SELECT MAX(id) FROM signals GROUP BY coin
+        )
+        """)
+        for coin, rsi in c.fetchall():
+            if rsi is not None and (rsi < 35 or rsi > 65):
+                coins.add(coin)
+    return sorted(list(coins)) if coins else ["BTC-EUR"]
 
 @app.route("/", methods=["GET"])
 def index():
-    bv = get_bitvavo_client()
-    balances = bv.balance({})
-    show_balances = [b for b in balances if float(b['available']) > 0 or float(b['inOrder']) > 0]
     relevant_coins = get_relevant_coins()
     selected_coin = request.args.get("coin", relevant_coins[0])
     return render_template_string(
         DASHBOARD_HTML,
-        balances=show_balances,
         relevant_coins=relevant_coins,
         selected_coin=selected_coin,
     )
 
 @app.route("/chart/<market>")
 def chart(market):
-    df = get_candles_df(market, interval="1h", limit=50)
-    if df is None or df.empty or len(df) < 2:
-        return "Geen data", 404
-    df = add_all_indicators(df)
-    fig, ax = plt.subplots(figsize=(7, 3))
-    ax.plot(df["timestamp"], df["close"], label="Close prijs", color='blue')
+    with get_db_conn() as conn:
+        c = conn.cursor()
+        c.execute("""
+            SELECT timestamp, close FROM candles
+            WHERE coin=? ORDER BY timestamp DESC LIMIT 50
+        """, (market,))
+        rows = c.fetchall()
+        if not rows:
+            return "Geen data", 404
+        # Laatste 50 candles in oplopende tijd
+        data = sorted([(int(ts), float(close)) for ts, close in rows])
+        timestamps, closes = zip(*data)
 
-    # Signaal-markers in grafiek
-    for i in range(1, len(df)):
-        s = None
-        try:
-            s = generate_signal(df.iloc[i-1:i+1])  # geef 2 rijen voor signal check
-        except Exception:
-            continue
-        if s == "BUY":
-            ax.annotate('BUY', (df["timestamp"].iloc[i], df["close"].iloc[i]), color='green',
-                        xytext=(0, 12), textcoords='offset points',
-                        arrowprops=dict(facecolor='green', arrowstyle='->'))
-        elif s == "SELL":
-            ax.annotate('SELL', (df["timestamp"].iloc[i], df["close"].iloc[i]), color='red',
-                        xytext=(0, -18), textcoords='offset points',
-                        arrowprops=dict(facecolor='red', arrowstyle='->'))
+        # Pak de signalen op deze timestamps
+        c.execute("""
+            SELECT timestamp, signal FROM signals
+            WHERE coin=? AND timestamp IN ({})
+        """.format(",".join("?"*len(timestamps))), (market, *timestamps))
+        signal_map = {int(ts): sig for ts, sig in c.fetchall()}
 
-    ax.set_title(f"{market} - Laatste 50 candles")
-    ax.set_xlabel("Tijd")
-    ax.set_ylabel("Prijs (EUR)")
-    fig.autofmt_xdate()
-    ax.legend()
+    # Plot
+    plt.figure(figsize=(7, 3))
+    plt.plot([time.strftime("%Y-%m-%d %H:%M", time.localtime(ts)) for ts in timestamps], closes, label="Close prijs", color='blue')
+    # Signaal-markers
+    for idx, ts in enumerate(timestamps):
+        sig = signal_map.get(ts)
+        if sig == "BUY":
+            plt.annotate('BUY', (idx, closes[idx]), color='green', xytext=(0, 12), textcoords='offset points',
+                         arrowprops=dict(facecolor='green', arrowstyle='->'))
+        elif sig == "SELL":
+            plt.annotate('SELL', (idx, closes[idx]), color='red', xytext=(0, -18), textcoords='offset points',
+                         arrowprops=dict(facecolor='red', arrowstyle='->'))
+
+    plt.title(f"{market} - Laatste 50 candles (DB)")
+    plt.xlabel("Tijd")
+    plt.ylabel("Prijs (EUR)")
+    plt.xticks(rotation=30)
     plt.tight_layout()
     buf = io.BytesIO()
-    fig.savefig(buf, format="png")
-    plt.close(fig)
+    plt.savefig(buf, format="png")
+    plt.close()
     buf.seek(0)
     return app.response_class(buf.read(), mimetype='image/png')
 
