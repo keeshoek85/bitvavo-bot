@@ -1,39 +1,41 @@
+import os
 import pandas as pd
+from utils.bitvavo_client import get_candles_df
 
-def add_sma(df, period=14, column='close', out_col=None):
-    if out_col is None:
-        out_col = f'sma_{period}'
-    df[out_col] = df[column].rolling(window=period, min_periods=1).mean()
-    return df
+def generate_signal(df):
+    """
+    Genereer trading signaal ('BUY', 'SELL', 'HOLD') o.b.v. RSI & MACD
+    """
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
 
-def add_ema(df, period=14, column='close', out_col=None):
-    if out_col is None:
-        out_col = f'ema_{period}'
-    df[out_col] = df[column].ewm(span=period, adjust=False).mean()
-    return df
+    # Basis-strategie, uitbreidbaar:
+    # BUY: RSI < 30 & MACD kruist boven signaallijn
+    if last['rsi'] < 30 and prev['macd'] < prev['macd_signal'] and last['macd'] > last['macd_signal']:
+        return 'BUY'
+    # SELL: RSI > 70 & MACD kruist onder signaallijn
+    if last['rsi'] > 70 and prev['macd'] > prev['macd_signal'] and last['macd'] < last['macd_signal']:
+        return 'SELL'
+    return 'HOLD'
 
-def add_rsi(df, period=14, column='close', out_col='rsi'):
-    delta = df[column].diff()
-    up = delta.clip(lower=0)
-    down = -delta.clip(upper=0)
-    ma_up = up.rolling(window=period, min_periods=1).mean()
-    ma_down = down.rolling(window=period, min_periods=1).mean()
-    rs = ma_up / (ma_down + 1e-10)
-    df[out_col] = 100 - (100 / (1 + rs))
-    return df
+def main():
+    # Voorbeeld: analyseer een lijst coins
+    coins = ['BTC-EUR', 'ETH-EUR', 'XRP-EUR']
+    interval = '1h'
+    limit = 100
 
-def add_macd(df, fast=12, slow=26, signal=9, column='close'):
-    df['ema_fast'] = df[column].ewm(span=fast, adjust=False).mean()
-    df['ema_slow'] = df[column].ewm(span=slow, adjust=False).mean()
-    df['macd'] = df['ema_fast'] - df['ema_slow']
-    df['macd_signal'] = df['macd'].ewm(span=signal, adjust=False).mean()
-    df['macd_hist'] = df['macd'] - df['macd_signal']
-    return df
+    results = []
+    for coin in coins:
+        try:
+            df = get_candles_df(coin, interval, limit)
+            df = add_all_indicators(df)
+            signal = generate_signal(df)
+            print(f"{coin}: {signal}")
+            results.append({'coin': coin, 'signal': signal})
+        except Exception as e:
+            print(f"Fout bij {coin}: {e}")
 
-def add_all_indicators(df, close_col='close'):
-    df = add_sma(df, period=14, column=close_col)
-    df = add_ema(df, period=12, column=close_col)
-    df = add_ema(df, period=26, column=close_col)
-    df = add_rsi(df, period=14, column=close_col)
-    df = add_macd(df, column=close_col)
-    return df
+    return results
+
+if __name__ == "__main__":
+    main()
