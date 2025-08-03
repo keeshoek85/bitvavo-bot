@@ -30,69 +30,69 @@ def main():
     all_markets = get_all_eur_markets(bitvavo)
     print(f"Aantal verhandelbare coins: {len(all_markets)}")
 
-for market in all_markets:
-    try:
-        df = get_candles_df(market, INTERVAL, CANDLE_LIMIT)
-        if df is None or df.empty or len(df) < 2:
-            print(f"{market}: GEEN of te weinig DATA (wordt overgeslagen)")
-            continue
-        df = add_all_indicators(df)
+    for market in all_markets:
+        try:
+            df = get_candles_df(market, INTERVAL, CANDLE_LIMIT)
+            if df is None or df.empty or len(df) < 2:
+                print(f"{market}: GEEN of te weinig DATA (wordt overgeslagen)")
+                continue
+            df = add_all_indicators(df)
 
-        # Log alle candles
-        for _, row in df.iterrows():
-            insert_candle(market, row)
+            # Log alle candles
+            for _, row in df.iterrows():
+                insert_candle(market, row)
 
-        signal = generate_signal(df)
-        insert_signal(
-            market,
-            int(df['timestamp'].iloc[-1].timestamp()),
-            signal,
-            float(df['rsi'].iloc[-1]),
-            float(df['macd'].iloc[-1]),
-            float(df['macd_signal'].iloc[-1]),
-        )
+            signal = generate_signal(df)
+            insert_signal(
+                market,
+                int(df['timestamp'].iloc[-1].timestamp()),
+                signal,
+                float(df['rsi'].iloc[-1]),
+                float(df['macd'].iloc[-1]),
+                float(df['macd_signal'].iloc[-1]),
+            )
 
-        symbol = market.split('-')[0]
-        bal = [b for b in bitvavo.balance({}) if b['symbol'] == symbol]
-        coin_avail = float(bal[0]['available']) if bal else 0.0
+            symbol = market.split('-')[0]
+            bal = [b for b in bitvavo.balance({}) if b['symbol'] == symbol]
+            coin_avail = float(bal[0]['available']) if bal else 0.0
 
-        print(f"{market}: Signaal = {signal} | Coin beschikbaar: {coin_avail}")
+            print(f"{market}: Signaal = {signal} | Coin beschikbaar: {coin_avail}")
 
-        if signal == 'BUY':
-            if eur_avail >= (TRADE_AMOUNT_EUR + MIN_EUR_AVAILABLE):
-                buy_amount = TRADE_AMOUNT_EUR / df['close'].iloc[-1]
-                resp = bitvavo.order(market, 'buy', 'market', {'amount': f"{buy_amount:.6f}"})
-                print(f"BUY {market}: Order geplaatst: {resp}")
-                eur_avail -= TRADE_AMOUNT_EUR
-                insert_trade(
-                    market,
-                    int(time.time()),
-                    'BUY',
-                    float(resp.get('price', 0)),
-                    float(resp.get('amount', 0)),
-                    resp.get('orderId', '')
-                )
+            if signal == 'BUY':
+                if eur_avail >= (TRADE_AMOUNT_EUR + MIN_EUR_AVAILABLE):
+                    buy_amount = TRADE_AMOUNT_EUR / df['close'].iloc[-1]
+                    resp = bitvavo.order(market, 'buy', 'market', {'amount': f"{buy_amount:.6f}"})
+                    print(f"BUY {market}: Order geplaatst: {resp}")
+                    eur_avail -= TRADE_AMOUNT_EUR
+                    insert_trade(
+                        market,
+                        int(time.time()),
+                        'BUY',
+                        float(resp.get('price', 0)),
+                        float(resp.get('amount', 0)),
+                        resp.get('orderId', '')
+                    )
+                else:
+                    print(f"Niet genoeg EUR om {market} te kopen.")
+            elif signal == 'SELL':
+                if coin_avail > 0:
+                    resp = bitvavo.order(market, 'sell', 'market', {'amount': f"{coin_avail:.6f}"})
+                    print(f"SELL {market}: Order geplaatst: {resp}")
+                    insert_trade(
+                        market,
+                        int(time.time()),
+                        'SELL',
+                        float(resp.get('price', 0)),
+                        float(resp.get('amount', 0)),
+                        resp.get('orderId', '')
+                    )
+                else:
+                    print(f"Niets te verkopen voor {market}.")
             else:
-                print(f"Niet genoeg EUR om {market} te kopen.")
-        elif signal == 'SELL':
-            if coin_avail > 0:
-                resp = bitvavo.order(market, 'sell', 'market', {'amount': f"{coin_avail:.6f}"})
-                print(f"SELL {market}: Order geplaatst: {resp}")
-                insert_trade(
-                    market,
-                    int(time.time()),
-                    'SELL',
-                    float(resp.get('price', 0)),
-                    float(resp.get('amount', 0)),
-                    resp.get('orderId', '')
-                )
-            else:
-                print(f"Niets te verkopen voor {market}.")
-        else:
-            print(f"Houd {market}: Geen actie.")
+                print(f"Houd {market}: Geen actie.")
 
-    except Exception as e:
-        print(f"Fout bij {market}: {e}")
+        except Exception as e:
+            print(f"Fout bij {market}: {e}")
 
 if __name__ == "__main__":
     main()
