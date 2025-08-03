@@ -56,24 +56,25 @@ def index():
 
 @app.route("/chart/<market>")
 def chart(market):
+    import io
+    import matplotlib.pyplot as plt
     df = get_candles_df(market, interval="1h", limit=50)
     if df is None or df.empty:
         return "Geen data", 404
     df = add_all_indicators(df)
-    plt.figure(figsize=(7, 3))
-    plt.plot(df["timestamp"], df["close"], label="Close prijs")
-    plt.title(f"{market} - Laatste 50 candles")
-    plt.xlabel("Tijd")
-    plt.ylabel("Prijs (EUR)")
-    plt.xticks(rotation=30)
+    fig, ax = plt.subplots(figsize=(7, 3))
+    ax.plot(df["timestamp"], df["close"], label="Close prijs")
+    ax.set_title(f"{market} - Laatste 50 candles")
+    ax.set_xlabel("Tijd")
+    ax.set_ylabel("Prijs (EUR)")
+    fig.autofmt_xdate()
+    ax.legend()
     plt.tight_layout()
     buf = io.BytesIO()
-    plt.savefig(buf, format="png")
-    plt.close()
+    fig.savefig(buf, format="png")
+    plt.close(fig)
     buf.seek(0)
-    img_base64 = base64.b64encode(buf.read()).decode("utf8")
-    return f'<img src="data:image/png;base64,{img_base64}">'
-
+    return app.response_class(buf.read(), mimetype='image/png')
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)
