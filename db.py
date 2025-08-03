@@ -43,6 +43,31 @@ def init_db():
         """)
         conn.commit()
 
+def insert_candle(coin, row):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO candles (coin, timestamp, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (coin, int(row['timestamp'].timestamp()), row['open'], row['high'], row['low'], row['close'], row['volume'])
+        )
+        conn.commit()
+
+def insert_signal(coin, timestamp, signal, rsi, macd, macd_signal):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO signals (coin, timestamp, signal, rsi, macd, macd_signal) VALUES (?, ?, ?, ?, ?, ?)",
+            (coin, timestamp, signal, rsi, macd, macd_signal)
+        )
+        conn.commit()
+
+def insert_trade(coin, timestamp, trade_type, price, amount, orderid):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO trades (coin, timestamp, trade_type, price, amount, orderid) VALUES (?, ?, ?, ?, ?, ?)",
+            (coin, timestamp, trade_type, price, amount, orderid)
+        )
+        conn.commit()
+
+
 if __name__ == "__main__":
     init_db()
     print("Database en tabellen aangemaakt!")
