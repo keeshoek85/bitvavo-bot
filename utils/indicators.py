@@ -37,3 +37,15 @@ def add_all_indicators(df, close_col='close'):
     df = add_rsi(df, period=14, column=close_col)
     df = add_macd(df, column=close_col)
     return df
+
+def add_scalping_indicators(df):
+    # 9 EMA en 21 EMA
+    df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
+    df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
+    # RSI(14)
+    delta = df['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    rs = gain / loss
+    df['rsi14'] = 100 - (100 / (1 + rs))
+    return df

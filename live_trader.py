@@ -1,8 +1,8 @@
 import time
 from utils.bitvavo_client import get_bitvavo_client, get_candles_df
-from utils.indicators import add_all_indicators
-from analyze_signals import generate_signal
 from db import insert_candle, insert_signal, insert_trade
+from utils.indicators import add_scalping_indicators
+from analyze_signals import generate_scalping_signal
 
 # Instellingen
 TRADE_AMOUNT_EUR = 10.00   # Vast bedrag per trade
@@ -33,10 +33,11 @@ def main():
     for market in all_markets:
         try:
             df = get_candles_df(market, INTERVAL, CANDLE_LIMIT)
-            if df is None or df.empty or len(df) < 2:
+            if df is None or df.empty or len(df) < 22:  # Minimaal 21 candles voor EMA
                 print(f"{market}: GEEN of te weinig DATA (wordt overgeslagen)")
                 continue
-            df = add_all_indicators(df)
+            df = add_scalping_indicators(df)
+            signal = generate_scalping_signal(df)
 
             # Log alle candles
             for _, row in df.iterrows():
