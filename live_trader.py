@@ -42,15 +42,15 @@ def main():
             # Log alle candles
             for _, row in df.iterrows():
                 insert_candle(market, row)
-
-            signal = generate_signal(df)
+            
+            signal = generate_scalping_signal(df)
             insert_signal(
                 market,
                 int(df['timestamp'].iloc[-1].timestamp()),
                 signal,
-                float(df['rsi'].iloc[-1]),
-                float(df['macd'].iloc[-1]),
-                float(df['macd_signal'].iloc[-1]),
+                float(df['rsi14'].iloc[-1]),
+                float(df['ema9'].iloc[-1]),
+                float(df['ema21'].iloc[-1]),
             )
 
             symbol = market.split('-')[0]
