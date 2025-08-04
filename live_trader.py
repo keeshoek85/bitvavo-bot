@@ -62,7 +62,7 @@ def main():
             if signal == 'BUY':
                 if eur_avail >= (TRADE_AMOUNT_EUR + MIN_EUR_AVAILABLE):
                     buy_amount = TRADE_AMOUNT_EUR / df['close'].iloc[-1]
-                    resp = bitvavo.order(market, 'buy', 'market', {'amount': f"{buy_amount:.6f}"})
+                    resp = bitvavo.placeOrder(market, 'buy', 'market', {'amount': f"{buy_amount:.6f}"})
                     print(f"BUY {market}: Order geplaatst: {resp}")
                     eur_avail -= TRADE_AMOUNT_EUR
                     insert_trade(
@@ -77,7 +77,7 @@ def main():
                     print(f"Niet genoeg EUR om {market} te kopen.")
             elif signal == 'SELL':
                 if coin_avail > 0:
-                    resp = bitvavo.order(market, 'sell', 'market', {'amount': f"{coin_avail:.6f}"})
+                    resp = bitvavo.placeOrder(market, 'sell', 'market', {'amount': f"{coin_avail:.6f}"})
                     print(f"SELL {market}: Order geplaatst: {resp}")
                     insert_trade(
                         market,
